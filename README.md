@@ -1,4 +1,4 @@
-Mind Mapping your StrategyP
+Mind Mapping your Strategy
 ===================
 
 ## Overview
