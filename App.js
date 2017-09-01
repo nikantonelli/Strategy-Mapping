@@ -247,7 +247,7 @@ Ext.define('Rally.app.ForceDiagram.app', {
     dfs: null,
 
     _kickOff: function() {
-        debugger;
+//        debugger;
         var pathElement = document.createElementNS("http://www.w3.org/2000/svg", 'path');
         pathElement.setAttribute('d',"M 0 0 L 10 5 L 0 10 z");
         pathElement.setAttribute('fill', 'content-stroke');
@@ -372,6 +372,7 @@ Ext.define('Rally.app.ForceDiagram.app', {
     Links: null,    //For graphics connection lines
     PredecessorLinks: null,
     SuccessorLinks: null,
+    enableCards: false,
         
     svg: null,
     
@@ -477,6 +478,7 @@ Ext.define('Rally.app.ForceDiagram.app', {
                 };
         });
 
+        //As far as links are concerned, successors are the same as predecessors
         gApp.PredecessorLinks = null;
         _.each(gApp.Nodes, function ( d, index, array) {
             var predecessors =  d.data.record.get('Predecessors');
@@ -495,41 +497,41 @@ Ext.define('Rally.app.ForceDiagram.app', {
                             };
                         });
                         gApp.PredecessorLinks = gApp.PredecessorLinks?gApp.PredecessorLinks.concat(links):links;
-                        console.log('Predecessors',gApp.PredecessorLinks);
                     }
                 };
                 predecessors = d.data.record.getCollection('Predecessors').load( collectionConfig);
             }
 
         });
-        gApp.SuccessorLinks = null;
-        _.each(gApp.Nodes, function ( d, index, array) {
-            var successors =  d.data.record.get('Successors');
-            if ( successors && successors.Count) { 
-                var collectionConfig = {
-                    fetch: gApp.STORE_FETCH_FIELD_LIST,
-                    callback: function(records, operation, success) {
-                        var links = _.map(records, function( record ) {
-                            return {
-                                source: index,
-                                // findIndex will return -1 if not found and we can use this to indicate 
-                                //a predecessors that is out of scope
-                                target: _.findIndex(gApp.Nodes, function(j, index, array) {
+        // gApp.SuccessorLinks = null;
+        // _.each(gApp.Nodes, function ( d, index, array) {
+        //     var successors =  d.data.record.get('Successors');
+        //     if ( successors && successors.Count) { 
+        //         var collectionConfig = {
+        //             fetch: gApp.STORE_FETCH_FIELD_LIST,
+        //             callback: function(records, operation, success) {
+        //                 var links = _.map(records, function( record ) {
+        //                     return {
+        //                         source: index,
+        //                         // findIndex will return -1 if not found and we can use this to indicate 
+        //                         //a predecessors that is out of scope
+        //                         target: _.findIndex(gApp.Nodes, function(j, index, array) {
 
-                                    return record.get('_ref') === j.id;
-                                })
-                            };
-                        });
-                        gApp.SuccessorLinks = gApp.SuccessorLinks?gApp.SuccessorLinks.concat(links):links;
-                        console.log('Successors',gApp.SuccessorLinks);
-                    }
-                };
-                successors = d.data.record.getCollection('Successors').load( collectionConfig);
-            }
+        //                             return record.get('_ref') === j.id;
+        //                         })
+        //                     };
+        //                 });
+        //                 gApp.SuccessorLinks = gApp.SuccessorLinks?gApp.SuccessorLinks.concat(links):links;
+        //             }
+        //         };
+        //         successors = d.data.record.getCollection('Successors').load( collectionConfig);
+        //     }
 
-        });
+        // });
 
         var force = d3.forceSimulation(gApp.Nodes)
+            .on("tick", gApp._tick)
+            .on("end", function() { gApp.enableCards = true;})
             .force( "charge", d3.forceManyBody()
                 .strength(function(d){ return -30 * (1 -  (d.value/maxValue));})
 //                .distanceMin(30)
@@ -543,7 +545,6 @@ Ext.define('Rally.app.ForceDiagram.app', {
              .force("center", d3.forceCenter(0, 0))
             // .force("collide", d3.forceCollide( function(d) { return -Math.log10(d.value); }))
             ;
-        force.on("tick", gApp._tick);
             
         function dragsubject() {
                 return force.find(d3.event.x - width / 2, d3.event.y - height / 2);
@@ -570,7 +571,7 @@ Ext.define('Rally.app.ForceDiagram.app', {
     _tick: function() {
 
         d3.select('#Predecessors').remove();
-        d3.select('#Successors').remove();
+//        d3.select('#Successors').remove();
         //If there are no children, don't do anything.
         if ( gApp._nodeTree.descendants().slice(1).length > 0){
             d3.select("#tree").remove();
@@ -622,14 +623,15 @@ Ext.define('Rally.app.ForceDiagram.app', {
                     .attr("class", 'predecessorlink')
                     .attr('marker-end',"url(#Triangle")
                     .attr('d', function(l) {
+                        var source = gApp.Nodes[l.source];
                         if (l.target !== -1) {
-                            var source = gApp.Nodes[l.source], target = gApp.Nodes[l.target];
+                            var target = gApp.Nodes[l.target];
                             return  "M " + source.x + "," + source.y + " " + "L " + target.x + "," + target.y;
                         } else {
                             //Flag an error condition to the user
-                            Rallu.ui.notify.Notifier.showWarning('Predecessors extend beyond scope');
+                            Rally.ui.notify.Notifier.showWarning('Predecessors extend beyond scope', source.data.Name);
                         }
-                    })
+                    });
             }
         }
         else {
@@ -652,7 +654,7 @@ Ext.define('Rally.app.ForceDiagram.app', {
                         //Flag an error condition to the user
                         Rallu.ui.notify.Notifier.showWarning('Successors extend beyond scope');
                     }
-                })
+                });
             }
         }
         else {
@@ -669,7 +671,7 @@ Ext.define('Rally.app.ForceDiagram.app', {
             //Only exists on real items, so do something for the 'unknown' item
             return;
         } else {
-
+            if (!gApp.enableCards) return;
             if ( !node.card) {
                 var card = Ext.create('Rally.ui.cardboard.Card', {
                     'record': node.data.record,
@@ -699,6 +701,8 @@ Ext.define('Rally.app.ForceDiagram.app', {
 
     _nodeClick: function (node,index,array) {
         if (!(node.data.record.data.ObjectID)) return; //Only exists on real items
+        if (!gApp.enableCards) return;
+
         //Get ordinal (or something ) to indicate we are the lowest level, then use "UserStories" instead of "Children"
 
         var childField = null;

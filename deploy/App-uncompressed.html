@@ -253,7 +253,26 @@ Ext.define('Rally.app.ForceDiagram.app', {
         });
     },
 
+    dfs: null,
+
     _kickOff: function() {
+//        debugger;
+        var pathElement = document.createElementNS("http://www.w3.org/2000/svg", 'path');
+        pathElement.setAttribute('d',"M 0 0 L 10 5 L 0 10 z");
+        pathElement.setAttribute('fill', 'content-stroke');
+        var marker = document.createElementNS("http://www.w3.org/2000/svg", 'marker');
+        marker.setAttribute('id','Triangle');
+        marker.setAttribute('viewBox','0 0 10 10');
+        marker.setAttribute('refX',1);
+        marker.setAttribute('refY',5);
+        marker.setAttribute('markerUnits','strokeWidth');
+        marker.setAttribute('markerWidth',4);
+        marker.setAttribute('markerHeight',3);
+        marker.setAttribute('orient','auto');
+        marker.appendChild(pathElement);
+        gApp.dfs = document.createElementNS("http://www.w3.org/2000/svg",'defs');
+        gApp.dfs.appendChild(marker);
+        
         var ptype = gApp.down('#piType');
         var hdrBox = gApp.down('#headerBox');
         gApp._typeStore = ptype.store;
@@ -362,6 +381,7 @@ Ext.define('Rally.app.ForceDiagram.app', {
     Links: null,    //For graphics connection lines
     PredecessorLinks: null,
     SuccessorLinks: null,
+    enableCards: false,
         
     svg: null,
     
@@ -520,6 +540,8 @@ Ext.define('Rally.app.ForceDiagram.app', {
         });
 
         var force = d3.forceSimulation(gApp.Nodes)
+            .on("tick", gApp._tick)
+            .on("end", function() { gApp._enableCards = true;})
             .force( "charge", d3.forceManyBody()
                 .strength(function(d){ return -30 * (1 -  (d.value/maxValue));})
 //                .distanceMin(30)
@@ -533,7 +555,6 @@ Ext.define('Rally.app.ForceDiagram.app', {
              .force("center", d3.forceCenter(0, 0))
             // .force("collide", d3.forceCollide( function(d) { return -Math.log10(d.value); }))
             ;
-        force.on("tick", gApp._tick);
             
         function dragsubject() {
                 return force.find(d3.event.x - width / 2, d3.event.y - height / 2);
@@ -599,7 +620,7 @@ Ext.define('Rally.app.ForceDiagram.app', {
             });
             gApp._setViewBox( [ minX, minY, maxX, maxY]);
             // g.attr("transform","translate(" + minX + "," + minY + ")");
-            gApp._DisplayPredecessors(true);            gApp._DisplaySuccessors(true);
+            gApp._DisplayPredecessors(true);  //          gApp._DisplaySuccessors(true);
         }
     },
 
@@ -610,6 +631,7 @@ Ext.define('Rally.app.ForceDiagram.app', {
 
                 g.selectAll('.plink').data(gApp.PredecessorLinks).enter().append("path")
                     .attr("class", 'predecessorlink')
+                    .attr('marker-end',"url(#Triangle")
                     .attr('d', function(l) {
                         if (l.target !== -1) {
                             var source = gApp.Nodes[l.source], target = gApp.Nodes[l.target];
@@ -618,7 +640,7 @@ Ext.define('Rally.app.ForceDiagram.app', {
                             //Flag an error condition to the user
                             Rallu.ui.notify.Notifier.showWarning('Predecessors extend beyond scope');
                         }
-                    })
+                    });
             }
         }
         else {
@@ -641,7 +663,7 @@ Ext.define('Rally.app.ForceDiagram.app', {
                         //Flag an error condition to the user
                         Rallu.ui.notify.Notifier.showWarning('Successors extend beyond scope');
                     }
-                })
+                });
             }
         }
         else {
@@ -658,7 +680,7 @@ Ext.define('Rally.app.ForceDiagram.app', {
             //Only exists on real items, so do something for the 'unknown' item
             return;
         } else {
-
+            if (!gApp.enableCards) return;
             if ( !node.card) {
                 var card = Ext.create('Rally.ui.cardboard.Card', {
                     'record': node.data.record,
@@ -688,6 +710,8 @@ Ext.define('Rally.app.ForceDiagram.app', {
 
     _nodeClick: function (node,index,array) {
         if (!(node.data.record.data.ObjectID)) return; //Only exists on real items
+        if (!gApp.enableCards) return;
+
         //Get ordinal (or something ) to indicate we are the lowest level, then use "UserStories" instead of "Children"
 
         var childField = null;
