@@ -179,10 +179,7 @@ Ext.define('Rally.app.ForceDiagram.app', {
         var viewBox = [ 0, 0, 1200, 900 ];
         gApp._setViewBox(viewBox);
         g = d3.select('svg').append('g')
-            .attr('id','tree')
-            //Transform to the centre of the screen
-//            .attr("transform","translate(" + viewBoxSize[0]/2 + "," + viewBoxSize[1]/2 + ")");
-//            .attr("transform","translate(50,50)");
+            .attr('id','tree');
             gApp._refreshTree();    //Need to redraw if things are added
     },
 
@@ -247,7 +244,26 @@ Ext.define('Rally.app.ForceDiagram.app', {
         });
     },
 
+    dfs: null,
+
     _kickOff: function() {
+        debugger;
+        var pathElement = document.createElementNS("http://www.w3.org/2000/svg", 'path');
+        pathElement.setAttribute('d',"M 0 0 L 10 5 L 0 10 z");
+        pathElement.setAttribute('fill', 'content-stroke');
+        var marker = document.createElementNS("http://www.w3.org/2000/svg", 'marker');
+        marker.setAttribute('id','Triangle');
+        marker.setAttribute('viewBox','0 0 10 10');
+        marker.setAttribute('refX',1);
+        marker.setAttribute('refY',5);
+        marker.setAttribute('markerUnits','strokeWidth');
+        marker.setAttribute('markerWidth',4);
+        marker.setAttribute('markerHeight',3);
+        marker.setAttribute('orient','auto');
+        marker.appendChild(pathElement);
+        gApp.dfs = document.createElementNS("http://www.w3.org/2000/svg",'defs');
+        gApp.dfs.appendChild(marker);
+        
         var ptype = gApp.down('#piType');
         var hdrBox = gApp.down('#headerBox');
         gApp._typeStore = ptype.store;
@@ -354,23 +370,43 @@ Ext.define('Rally.app.ForceDiagram.app', {
     _nodeTree: null,    //Tree of artefacts created locally
     Nodes: null,   //For graphics display of nodeTree
     Links: null,    //For graphics connection lines
+    PredecessorLinks: null,
+    SuccessorLinks: null,
         
     svg: null,
     
     _setViewBox: function(viewBox) {
-       gApp.svg = d3.select('svg');
+//        debugger;
+        var displayBox = [ 1200, 900];
+        gApp.svg = d3.select('svg');
         var rs = this.down('#rootSurface');
-        rs.getEl().setWidth(viewBox[2] - viewBox[0]);
-        rs.getEl().setHeight(viewBox[3] - viewBox[1]);
+        rs.getEl().setWidth(displayBox[0]);
+        rs.getEl().setHeight(displayBox[1]);
         //Set the svg area to the surface
         gApp.svg.attr('class', 'rootSurface')
-            .attr('width', viewBox[2] - viewBox[0])
-            .attr('height',viewBox[3] - viewBox[1])
-            .attr('preserveAspectRatio', 'none')
-            .attr('viewBox', viewBox[0] + ' ' + viewBox[1] + ' ' + viewBox[2] + ' ' + viewBox[3]);   //Dimension same as pixels
-//            .attr('viewBox', '0 0 100 100');   //Dimension same as pixels
+            .attr('width', displayBox[0])
+            .attr('height',displayBox[1])
+            .attr('preserveAspectRatio', 'xMidYMid')
+            .attr('viewBox', function(d) { 
+                return ' ' +
+                gApp._roundOutTo(50,viewBox[0]) + ' ' +
+                gApp._roundOutTo(50,viewBox[1]) + ' ' +
+                gApp._roundOutTo(50,viewBox[2]-viewBox[0]) + ' ' +
+                gApp._roundOutTo(50,viewBox[3]-viewBox[1]) + ' ' ;
+            });
+            
         gApp._radius = Math.min(viewBox[2] - viewBox[0], viewBox[3] - viewBox[1])/2;
 },
+
+    _roundBigger: function(num) {
+        if (num < 0) return Math.floor(num);
+        if (num > 0) return Math.ceil(num);
+        return num;
+    },
+
+    _roundOutTo: function ( lump, num) {
+        return ( gApp._roundBigger(num/lump)*lump);
+    },
 
     _refreshTree: function(){
 
@@ -429,7 +465,7 @@ Ext.define('Rally.app.ForceDiagram.app', {
         gApp._nodeTree.each( function(d) {
 //            debugger;
             d.value = (d.value / (maxValue + 1)) * (gApp._radius/2);
-        })
+        });
 
         gApp.Nodes = gApp._nodeTree.descendants();
         gApp.Links = _.map(gApp.Nodes, function (d, index, array) {
@@ -440,17 +476,74 @@ Ext.define('Rally.app.ForceDiagram.app', {
                                         }): index
                 };
         });
+
+        gApp.PredecessorLinks = null;
+        _.each(gApp.Nodes, function ( d, index, array) {
+            var predecessors =  d.data.record.get('Predecessors');
+            if ( predecessors && predecessors.Count) { 
+                var collectionConfig = {
+                    fetch: gApp.STORE_FETCH_FIELD_LIST,
+                    callback: function(records, operation, success) {
+                        var links = _.map(records, function( record ) {
+                            return {
+                                source: index,
+                                // findIndex will return -1 if not found and we can use this to indicate 
+                                //a predecessors that is out of scope
+                                target: _.findIndex(gApp.Nodes, function(j, index, array) {
+                                    return record.get('_ref') === j.id;
+                                })
+                            };
+                        });
+                        gApp.PredecessorLinks = gApp.PredecessorLinks?gApp.PredecessorLinks.concat(links):links;
+                        console.log('Predecessors',gApp.PredecessorLinks);
+                    }
+                };
+                predecessors = d.data.record.getCollection('Predecessors').load( collectionConfig);
+            }
+
+        });
+        gApp.SuccessorLinks = null;
+        _.each(gApp.Nodes, function ( d, index, array) {
+            var successors =  d.data.record.get('Successors');
+            if ( successors && successors.Count) { 
+                var collectionConfig = {
+                    fetch: gApp.STORE_FETCH_FIELD_LIST,
+                    callback: function(records, operation, success) {
+                        var links = _.map(records, function( record ) {
+                            return {
+                                source: index,
+                                // findIndex will return -1 if not found and we can use this to indicate 
+                                //a predecessors that is out of scope
+                                target: _.findIndex(gApp.Nodes, function(j, index, array) {
+
+                                    return record.get('_ref') === j.id;
+                                })
+                            };
+                        });
+                        gApp.SuccessorLinks = gApp.SuccessorLinks?gApp.SuccessorLinks.concat(links):links;
+                        console.log('Successors',gApp.SuccessorLinks);
+                    }
+                };
+                successors = d.data.record.getCollection('Successors').load( collectionConfig);
+            }
+
+        });
+
         var force = d3.forceSimulation(gApp.Nodes)
-            .on("tick", gApp._tick)
-            .force( "charge", d3.forceManyBody())
+            .force( "charge", d3.forceManyBody()
+                .strength(function(d){ return -30 * (1 -  (d.value/maxValue));})
+//                .distanceMin(30)
+            )
             .force( "link", d3.forceLink(gApp.Links)
-                .distance(function(d) { return d.source.value; })
-                .strength(2))
+                // .distance(function(d) { return 80; })
+                // .strength(1))
+            )
             .force ("x", d3.forceX())
             .force("y", d3.forceY())
-            .force("center", d3.forceCenter(0, 0))
-//            .force("collide", d3.forceCollide( function(d) { return Math.log10(d.value); }))
+             .force("center", d3.forceCenter(0, 0))
+            // .force("collide", d3.forceCollide( function(d) { return -Math.log10(d.value); }))
             ;
+        force.on("tick", gApp._tick);
             
         function dragsubject() {
                 return force.find(d3.event.x - width / 2, d3.event.y - height / 2);
@@ -476,35 +569,96 @@ Ext.define('Rally.app.ForceDiagram.app', {
 
     _tick: function() {
 
-        d3.select("#tree").remove();
-        g = d3.select('svg').append('g')
-            .attr('id','tree')
-            //Transform to the centre of the screen
-            .attr("transform","translate(" + gApp._radius + "," + gApp._radius + ")");
+        d3.select('#Predecessors').remove();
+        d3.select('#Successors').remove();
+        //If there are no children, don't do anything.
+        if ( gApp._nodeTree.descendants().slice(1).length > 0){
+            d3.select("#tree").remove();
+            g = d3.select('svg').append('g')
+                .attr('id','tree')
+                //Transform to the centre of the screen
+                // .attr("transform","translate(" + gApp._radius + "," + gApp._radius + ")");
+                ;
 
-        g.selectAll('.link').data(gApp._nodeTree.descendants().slice(1)).enter().append("path")
-            .attr("class", function(d) { return d.data.invisibleLink? "invisible--link" :  "local--link" ;})        
-            .attr('d', 
-                function(d) { 
-                        return "M " + d.x + "," + d.y + " " + "L " + d.parent.x + "," + d.parent.y;
-                });
-//        gApp.Nodes.forEach(drawLink);
-        var node = g.selectAll(".node").data(gApp._nodeTree.descendants()).enter().append("g")
-            .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
-        node.append("circle")
-                    .attr("r", function(d) { return 5 * Math.log10(5+d.value);})
-                    .attr("class", "dotOutline");
-        
-        var minX = Infinity, maxX = 0, minY = Infinity, maxY = 0;
-        node.each( function(d) {
-            if (d.x > maxX) maxX = d.x;
-            if (d.x < minX) minX = d.x;
-            if (d.y > maxY) maxY = d.y;
-            if (d.y < minY) minY = d.y;
-        });
-        gApp._setViewBox( [ minX, minY, maxX, maxY]);
+            g.selectAll('.link').data(gApp._nodeTree.descendants().slice(1)).enter().append("path")
+                .attr("class", function(d) { return d.data.invisibleLink? "invisible--link" :  "local--link" ;})        
+                .attr('d', 
+                    function(d) { 
+                            return "M " + d.x + "," + d.y + " " + "L " + d.parent.x + "," + d.parent.y;
+                    })
+                .attr('id', function(d) { return d.id + '-' + d.parent.id;});
+    //        gApp.Nodes.forEach(drawLink);
+            var node = g.selectAll(".node").data(gApp._nodeTree.descendants()).enter().append("g")
+                .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; })
+                ;
+            node.append("circle")
+                        .attr("r", function(d) { return 5 * Math.log10(5+d.value);})
+                        .attr("class", "dotOutline")
+                        .on("click", function(node, index, array) { gApp._nodeClick(node,index,array);})
+                        .on("mouseover", function(node, index, array) { gApp._nodeMouseOver(node,index,array);})
+                        .on("mouseout", function(node, index, array) { gApp._nodeMouseOut(node,index,array);});
+            
+            
+            var minX = Infinity, maxX = 0, minY = Infinity, maxY = 0;
+
+            node.each( function(d) {
+                if (d.x > maxX) maxX = d.x;
+                if (d.x < minX) minX = d.x;
+                if (d.y > maxY) maxY = d.y;
+                if (d.y < minY) minY = d.y;
+            });
+            gApp._setViewBox( [ minX, minY, maxX, maxY]);
+            // g.attr("transform","translate(" + minX + "," + minY + ")");
+            gApp._DisplayPredecessors(true);  //          gApp._DisplaySuccessors(true);
+        }
     },
 
+    _DisplayPredecessors: function(state) {
+        if ( state ) {
+            if (gApp.PredecessorLinks) {
+                g = d3.select('svg').append('g').attr('id','Predecessors');
+
+                g.selectAll('.plink').data(gApp.PredecessorLinks).enter().append("path")
+                    .attr("class", 'predecessorlink')
+                    .attr('marker-end',"url(#Triangle")
+                    .attr('d', function(l) {
+                        if (l.target !== -1) {
+                            var source = gApp.Nodes[l.source], target = gApp.Nodes[l.target];
+                            return  "M " + source.x + "," + source.y + " " + "L " + target.x + "," + target.y;
+                        } else {
+                            //Flag an error condition to the user
+                            Rallu.ui.notify.Notifier.showWarning('Predecessors extend beyond scope');
+                        }
+                    })
+            }
+        }
+        else {
+            d3.select('#Predecessors').remove();
+        }
+    },
+    
+    _DisplaySuccessors: function(state) {
+        if ( state ) {
+            if (gApp.SuccessorLinks) {
+            g = d3.select('svg').append('g').attr('id','Successors');
+
+            g.selectAll('.plink').data(gApp.SuccessorLinks).enter().append("path")
+                .attr("class", 'successorlink')
+                .attr('d', function(l) {
+                    if (l.target !== -1) {
+                        var source = gApp.Nodes[l.source], target = gApp.Nodes[l.target];
+                        return  "M " + source.x + "," + source.y + " " + "L " + target.x + "," + target.y;
+                    } else {
+                        //Flag an error condition to the user
+                        Rallu.ui.notify.Notifier.showWarning('Successors extend beyond scope');
+                    }
+                })
+            }
+        }
+        else {
+            d3.select('#Successors').remove();
+        }
+    },
     
     _nodeMouseOut: function(node, index,array){
         if (node.card) node.card.hide();
